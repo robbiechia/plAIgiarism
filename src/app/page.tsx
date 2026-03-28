@@ -222,39 +222,82 @@ function PhraseRow({ row }: { row: PhraseRow }) {
   );
 }
 
+// ─── Step icon classifier ─────────────────────────────────────────────────────
+
+function stepIcon(text: string): { icon: string; color: string } {
+  const t = text.toLowerCase();
+  if (t.includes("navigat") || t.includes("go to") || t.includes("open") || t.includes("visit"))
+    return { icon: "🌐", color: "text-sky-400" };
+  if (t.includes("search") || t.includes("type") || t.includes("enter") || t.includes("query") || t.includes("input"))
+    return { icon: "🔍", color: "text-violet-400" };
+  if (t.includes("click") || t.includes("select") || t.includes("press") || t.includes("tap"))
+    return { icon: "👆", color: "text-amber-400" };
+  if (t.includes("extract") || t.includes("found") || t.includes("collect") || t.includes("read") || t.includes("retriev"))
+    return { icon: "📋", color: "text-emerald-400" };
+  if (t.includes("scroll") || t.includes("wait") || t.includes("load"))
+    return { icon: "⏳", color: "text-slate-400" };
+  if (t.includes("complete") || t.includes("done") || t.includes("finish") || t.includes("success"))
+    return { icon: "✅", color: "text-emerald-400" };
+  if (t.includes("error") || t.includes("fail") || t.includes("block"))
+    return { icon: "⚠️", color: "text-red-400" };
+  return { icon: "▸", color: "text-slate-500" };
+}
+
 // ─── Browser Panel ────────────────────────────────────────────────────────────
 
 function BrowserPanel({ browser }: { browser: BrowserState }) {
   const logRef = useRef<HTMLDivElement>(null);
   const startTs = useRef(0);
+  const openedUrls = useRef<Set<string>>(new Set());
+
+  // Auto-open streaming URL in a new tab the moment it arrives.
+  // This is the most reliable way to show the live browser — no iframe CSP issues.
+  useEffect(() => {
+    if (browser.streamingUrl && !openedUrls.current.has(browser.streamingUrl)) {
+      openedUrls.current.add(browser.streamingUrl);
+      window.open(browser.streamingUrl, "_blank", "noopener,noreferrer");
+    }
+  }, [browser.streamingUrl]);
 
   useEffect(() => {
     if (browser.steps.length > 0 && startTs.current === 0) startTs.current = browser.steps[0].ts;
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [browser.steps]);
 
-  const elapsed = (ts: number) => `${Math.round((ts - (startTs.current || ts)) / 1000)}s`;
+  const elapsed = (ts: number) =>
+    `+${Math.round((ts - (startTs.current || ts)) / 1000)}s`;
+
+  const lastStep = browser.steps[browser.steps.length - 1];
 
   return (
     <div className="rounded-xl border overflow-hidden flex flex-col" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-      {/* Chrome header */}
-      <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+
+      {/* ── Chrome bar ── */}
+      <div className="flex items-center gap-2.5 px-3 py-2 border-b" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
         <div className="flex gap-1.5 flex-shrink-0">
           <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
           <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
         </div>
-        <div className="flex-1 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs min-w-0"
+
+        {/* URL bar */}
+        <div className="flex-1 flex items-center gap-1.5 rounded-md px-2.5 py-1 min-w-0"
           style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
-          <svg className="w-3 h-3 text-slate-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-          </svg>
-          <span className="text-slate-500 truncate font-mono text-xs">
-            {browser.streamingUrl
-              ? (() => { try { return new URL(browser.streamingUrl).hostname; } catch { return "agent.tinyfish.ai"; } })()
+          {browser.isActive ? (
+            <div className="w-2.5 h-2.5 rounded-full border-2 border-sky-500/40 border-t-sky-400 animate-spin flex-shrink-0" />
+          ) : (
+            <svg className="w-2.5 h-2.5 text-slate-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
+            </svg>
+          )}
+          <span className="text-xs font-mono truncate" style={{ color: browser.isActive ? "#94a3b8" : "#475569" }}>
+            {browser.activeLabel
+              ? browser.activeLabel.split("—")[0].trim().toLowerCase().replace(/\s+/g, "")
               : "agent.tinyfish.ai"}
           </span>
         </div>
+
+        {/* Status */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {browser.isActive ? (
             <>
@@ -264,7 +307,7 @@ function BrowserPanel({ browser }: { browser: BrowserState }) {
               </span>
               <span className="text-xs text-emerald-400 font-medium">Live</span>
               {browser.activeCount > 1 && (
-                <span className="text-xs bg-sky-500/15 text-sky-400 border border-sky-500/25 rounded px-1.5 font-mono">
+                <span className="text-xs bg-sky-500/15 text-sky-400 border border-sky-500/25 rounded px-1 font-mono">
                   ×{browser.activeCount}
                 </span>
               )}
@@ -275,73 +318,124 @@ function BrowserPanel({ browser }: { browser: BrowserState }) {
             <span className="text-xs text-slate-600">Idle</span>
           )}
         </div>
+
+        {/* Open streaming URL */}
         {browser.streamingUrl && (
           <a href={browser.streamingUrl} target="_blank" rel="noopener noreferrer"
-            className="flex-shrink-0 text-sky-500 hover:text-sky-400 transition-colors ml-1">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
+            className="flex-shrink-0 flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 border border-sky-500/30 rounded px-2 py-0.5 transition-all hover:bg-sky-500/10 whitespace-nowrap">
+            Watch live ↗
           </a>
         )}
       </div>
 
-      {/* Viewport */}
-      <div className="relative" style={{ height: "200px", background: "#0d1117" }}>
+      {/* ── Viewport ── */}
+      <div className="relative" style={{ height: "280px", background: "#0d1117" }}>
         {browser.streamingUrl ? (
-          <iframe key={browser.streamingUrl} src={browser.streamingUrl} className="w-full h-full border-0"
-            title="Tinyfish browser agent" sandbox="allow-same-origin allow-scripts" />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full gap-3">
-            {browser.isActive ? (
-              <>
-                <div className="flex gap-1">
-                  {[0,1,2].map(i => (
-                    <div key={i} className="w-1.5 h-1.5 rounded-full bg-sky-500"
-                      style={{ animation: `bounce 1.2s ease-in-out ${i*0.2}s infinite` }} />
-                  ))}
+          <>
+            {/* No sandbox — streaming URL needs WebSockets / full browser permissions */}
+            <iframe
+              key={browser.streamingUrl}
+              src={browser.streamingUrl}
+              className="w-full h-full border-0"
+              title="Tinyfish live browser"
+              allow="autoplay; clipboard-read; clipboard-write; encrypted-media; fullscreen; picture-in-picture; web-share; cross-origin-isolated"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+            {/* Overlay: open in full view */}
+            <div className="absolute top-2 right-2 z-10">
+              <a href={browser.streamingUrl} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-white rounded-md px-2.5 py-1.5 transition-all font-medium"
+                style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+                Full view
+              </a>
+            </div>
+          </>
+        ) : browser.isActive ? (
+          /* ── Animated placeholder while stream loads ── */
+          <div className="flex flex-col h-full">
+            {/* Fake inner address bar */}
+            <div className="px-3 py-2 border-b flex items-center gap-2" style={{ borderColor: "#1a2235", background: "#0f1623" }}>
+              <div className="w-3 h-3 rounded-full border-2 border-t-sky-400 border-sky-500/30 animate-spin flex-shrink-0" />
+              <div className="flex-1 text-xs font-mono text-slate-500 truncate">
+                {browser.activeLabel ? browser.activeLabel.split("—")[0].trim() : "Connecting to browser…"}
+              </div>
+            </div>
+
+            {/* Skeleton page content */}
+            <div className="flex-1 p-4 space-y-3">
+              {/* Fake search bar */}
+              <div className="flex gap-2 mb-4">
+                <div className="flex-1 h-8 rounded-full bg-slate-800/80 animate-pulse" />
+                <div className="w-16 h-8 rounded-full bg-slate-800/50 animate-pulse" />
+              </div>
+              {/* Fake results */}
+              {[100, 85, 70, 60].map((w, i) => (
+                <div key={i} className="space-y-1.5" style={{ animationDelay: `${i * 100}ms` }}>
+                  <div className="h-2.5 rounded-full bg-sky-900/40 animate-pulse" style={{ width: `${w * 0.6}%` }} />
+                  <div className="h-2 rounded-full bg-slate-800/60 animate-pulse" style={{ width: `${w}%` }} />
+                  <div className="h-2 rounded-full bg-slate-800/40 animate-pulse" style={{ width: `${w * 0.8}%` }} />
                 </div>
-                <p className="text-xs text-slate-500">
-                  {browser.activeLabel ? `Searching ${browser.activeLabel}…` : "Connecting…"}
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="text-2xl opacity-20">🔍</div>
-                <p className="text-xs text-slate-700">Browser agent will appear here</p>
-              </>
+              ))}
+            </div>
+
+            {/* Current action overlay */}
+            {lastStep && (
+              <div className="px-3 pb-3">
+                <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2"
+                  style={{ background: "rgba(14,165,233,0.08)", border: "1px solid rgba(14,165,233,0.15)" }}>
+                  <span className="animate-pulse">{stepIcon(lastStep.text).icon}</span>
+                  <span className="text-slate-400 truncate">{lastStep.text}</span>
+                </div>
+              </div>
             )}
           </div>
-        )}
-        {browser.isActive && browser.activeLabel && (
-          <div className="absolute bottom-2 left-2 right-2">
-            <div className="rounded-md px-2.5 py-1.5 text-xs text-slate-400 truncate"
-              style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <span className="text-slate-600 mr-1.5">→</span>{browser.activeLabel}
-            </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full gap-2 opacity-30">
+            <div className="text-3xl">🌐</div>
+            <p className="text-xs text-slate-600">Browser agent will appear here</p>
           </div>
         )}
       </div>
 
-      {/* Action log */}
-      <div ref={logRef} className="overflow-y-auto px-3 py-2" style={{ maxHeight: "140px", background: "#0a0d14" }}>
+      {/* ── Action log ── */}
+      <div ref={logRef} className="overflow-y-auto" style={{ maxHeight: "160px", background: "#080b11" }}>
         {browser.steps.length === 0 ? (
-          <p className="text-xs text-slate-700 py-1">Waiting for browser actions…</p>
+          <p className="text-xs text-slate-700 px-3 py-2">Waiting for browser actions…</p>
         ) : (
-          browser.steps.map((step, i) => {
-            const isLast = i === browser.steps.length - 1;
-            return (
-              <div key={i} className={`flex items-start gap-2.5 py-0.5 text-xs ${isLast && browser.isActive ? "text-slate-300" : "text-slate-600"}`}>
-                <span className="font-mono text-slate-700 w-6 text-right flex-shrink-0 tabular-nums">{elapsed(step.ts)}</span>
-                <span className={`flex-shrink-0 ${isLast && browser.isActive ? "text-sky-400" : "text-slate-700"}`}>
-                  {isLast && browser.isActive ? "▶" : "·"}
-                </span>
-                <span className="leading-relaxed">
-                  <span className="text-slate-700 mr-1">[{step.label}]</span>
-                  {step.text}
-                </span>
-              </div>
-            );
-          })
+          <div className="py-1.5">
+            {browser.steps.map((step, i) => {
+              const isLast = i === browser.steps.length - 1;
+              const { icon, color } = stepIcon(step.text);
+              return (
+                <div key={i}
+                  className={`flex items-start gap-2.5 px-3 py-1 text-xs transition-colors ${
+                    isLast && browser.isActive ? "bg-sky-950/30" : ""
+                  }`}>
+                  <span className="font-mono text-slate-700 w-7 text-right flex-shrink-0 tabular-nums pt-0.5">
+                    {elapsed(step.ts)}
+                  </span>
+                  <span className={`flex-shrink-0 text-sm leading-none pt-px ${isLast && browser.isActive ? color : "opacity-40"}`}>
+                    {icon}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span className={`font-medium text-xs ${isLast && browser.isActive ? "text-sky-600" : "text-slate-700"}`}>
+                      [{step.label}]
+                    </span>
+                    {" "}
+                    <span className={isLast && browser.isActive ? "text-slate-300" : "text-slate-600"}>
+                      {step.text}
+                    </span>
+                  </div>
+                  {isLast && browser.isActive && (
+                    <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse mt-1" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
