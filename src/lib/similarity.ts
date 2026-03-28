@@ -9,9 +9,9 @@
 /**
  * Returns true if `query` contains a run of `minWords` consecutive words
  * that all appear in `candidate` in the same order (exact substring match).
- * Implements §5A Layer A: ≥10 consecutive words = Exact Match flag.
+ * Implements §5A Layer A. Default 6 words — lyric lines are short.
  */
-export function exactMatchFlag(query: string, candidate: string, minWords = 10): boolean {
+export function exactMatchFlag(query: string, candidate: string, minWords = 6): boolean {
   const qWords = query.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
   const cText = candidate.toLowerCase().replace(/[^a-z0-9\s]/g, "");
 
@@ -59,6 +59,34 @@ export function lcsRatio(a: string, b: string): number {
     }
   }
   return (2 * dp[wA.length][wB.length]) / (wA.length + wB.length);
+}
+
+const COMMON_WORDS = new Set([
+  "a","an","the","and","or","but","in","on","at","to","for","of","with","by",
+  "from","is","are","was","were","be","been","i","we","you","he","she","they",
+  "it","my","your","his","her","their","this","that","not","so","as","if",
+  "all","just","up","out","about","like","get","got","do","did","no","so",
+]);
+
+/**
+ * Keyword presence score: fraction of the query's distinctive words that
+ * appear anywhere in title + url + snippet (0–100, capped at 80).
+ * Used as a fallback when the snippet is metadata rather than matched text.
+ */
+export function keywordPresenceScore(phrase: string, title: string, url: string, snippet: string): number {
+  const distinctWords = phrase
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !COMMON_WORDS.has(w));
+
+  if (distinctWords.length === 0) return 0;
+
+  const haystack = (title + " " + url + " " + snippet).toLowerCase();
+  const matches = distinctWords.filter((w) => haystack.includes(w)).length;
+  const ratio = matches / distinctWords.length;
+  // Cap at 80 — keyword presence alone is weaker evidence than text similarity
+  return Math.min(80, Math.round(ratio * 90));
 }
 
 /**

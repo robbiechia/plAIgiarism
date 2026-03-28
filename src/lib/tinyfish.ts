@@ -111,7 +111,14 @@ export function parseSearchHits(raw: string): SearchHit[] {
       .map((item: Record<string, unknown>) => ({
         title: String(item.title ?? ""),
         url: String(item.url ?? ""),
-        snippet: String(item.snippet ?? item.description ?? item.text ?? item.excerpt ?? ""),
+        // Try every field name a lyrics/academic site might use for the matched text
+        snippet: String(
+          item.snippet ??
+          item.verse ?? item.lyric ?? item.lyrics ??
+          item.matching_lyric ?? item.lyric_section ?? item.matching_section ??
+          item.transcript ?? item.passage ?? item.excerpt ??
+          item.abstract ?? item.description ?? item.text ?? item.content ?? ""
+        ),
       }))
       .filter((h) => h.url && h.url.startsWith("http"));
   } catch {

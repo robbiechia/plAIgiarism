@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { searchPhraseStream, parseSearchHits } from "@/lib/tinyfish";
-import { combinedSimilarity, overallScore, exactMatchFlag } from "@/lib/similarity";
+import { combinedSimilarity, overallScore, exactMatchFlag, keywordPresenceScore } from "@/lib/similarity";
 import { extractFingerprints, runLegitimacyFilter } from "@/lib/fingerprint";
 import { getTargets } from "@/lib/targets";
 
@@ -126,8 +126,14 @@ export async function POST(req: NextRequest) {
             const scored = hits
               .map((h) => {
                 const candidate = h.snippet + " " + h.title;
-                const sim = combinedSimilarity(phrase, candidate, legitimacy.isLegitimate);
-                const exact = exactMatchFlag(phrase, candidate, 10);
+                const semantic = combinedSimilarity(phrase, candidate, legitimacy.isLegitimate);
+                const presence = keywordPresenceScore(phrase, h.title, h.url, h.snippet);
+                // Use whichever is higher: text similarity or keyword presence.
+                // Then apply the source credibility floor — if this trusted source
+                // found a result at all, award at minimum credibilityFloor points.
+                const raw = Math.max(semantic, presence);
+                const sim = Math.max(raw, target.credibilityFloor);
+                const exact = exactMatchFlag(phrase, candidate);
                 return { ...h, similarity: sim, exactMatch: exact };
               })
               .sort((a, b) => b.similarity - a.similarity);
