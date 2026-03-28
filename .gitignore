@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables — never commit real keys
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Claude Code memory
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
