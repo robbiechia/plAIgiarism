@@ -90,28 +90,57 @@ export async function* searchPhraseStream(
   }
 }
 
+function normalizeUrl(raw: string): string {
+  if (!raw) return "";
+  if (raw.startsWith("http")) return raw;
+  if (raw.startsWith("//")) return "https:" + raw;
+  // bare domain like genius.com/...
+  if (/^[a-z0-9-]+\.[a-z]{2,}/i.test(raw)) return "https://" + raw;
+  return raw;
+}
+
 export function parseSearchHits(raw: string): SearchHit[] {
+  // Strip markdown fences and leading/trailing whitespace
   const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/, "")
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
     .trim();
 
-  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (!arrayMatch) return [];
+  let items: Record<string, unknown>[] = [];
 
-  try {
-    const parsed = JSON.parse(arrayMatch[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (item: unknown) =>
-          item && typeof item === "object" && "url" in (item as object)
-      )
-      .map((item: Record<string, unknown>) => ({
-        title: String(item.title ?? ""),
-        url: String(item.url ?? ""),
-        // Try every field name a lyrics/academic site might use for the matched text
+  // Pass 1: find the first JSON array anywhere in the string
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(parsed)) items = parsed;
+    } catch { /* continue */ }
+  }
+
+  // Pass 2: maybe it's an object wrapping an array { results: [...] }
+  if (items.length === 0) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const obj = parsed as Record<string, unknown>;
+        const nested = obj.results ?? obj.songs ?? obj.items ?? obj.data ?? obj.matches;
+        if (Array.isArray(nested)) items = nested as Record<string, unknown>[];
+      }
+    } catch { /* continue */ }
+  }
+
+  if (items.length === 0) return [];
+
+  return items
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const rawUrl = String(
+        item.url ?? item.link ?? item.href ?? item.source ??
+        item.page_url ?? item.song_url ?? ""
+      );
+      return {
+        title: String(item.title ?? item.song ?? item.name ?? item.song_title ?? ""),
+        url: normalizeUrl(rawUrl),
         snippet: String(
           item.snippet ??
           item.verse ?? item.lyric ?? item.lyrics ??
@@ -119,9 +148,7 @@ export function parseSearchHits(raw: string): SearchHit[] {
           item.transcript ?? item.passage ?? item.excerpt ??
           item.abstract ?? item.description ?? item.text ?? item.content ?? ""
         ),
-      }))
-      .filter((h) => h.url && h.url.startsWith("http"));
-  } catch {
-    return [];
-  }
+      };
+    })
+    .filter((h) => h.url.length > 5); // only require some URL to exist
 }

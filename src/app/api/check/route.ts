@@ -123,16 +123,37 @@ export async function POST(req: NextRequest) {
 
             const hits = resultRaw ? parseSearchHits(resultRaw) : [];
 
+            // FALLBACK: if no hits parsed but tinyfish returned a substantive
+            // result from a trusted source, build a synthetic hit so the
+            // credibility floor can still be applied.
+            if (hits.length === 0 && target.credibilityFloor > 0 && resultRaw) {
+              const t = resultRaw.trim();
+              const isNegative =
+                t.length < 20 ||
+                /^\s*\[\s*\]\s*$/.test(t) ||
+                /\b(not found|no results|no match|couldn.t find|nothing found)\b/i.test(t) ||
+                /"found"\s*:\s*false/i.test(t);
+
+              if (!isNegative) {
+                const urlInResult = t.match(/https?:\/\/[^\s"',\]\)\s]+/)?.[0];
+                const titleInResult =
+                  t.match(/"(?:title|song|name)"\s*:\s*"([^"]+)"/i)?.[1] ??
+                  t.match(/(?:title|song|track)[:\s]+([^\n,\[{]{3,60})/i)?.[1]?.trim();
+                hits.push({
+                  title: titleInResult ?? target.label + " result",
+                  url: urlInResult ?? target.url,
+                  snippet: t.slice(0, 600),
+                });
+              }
+            }
+
             const scored = hits
               .map((h) => {
                 const candidate = h.snippet + " " + h.title;
                 const semantic = combinedSimilarity(phrase, candidate, legitimacy.isLegitimate);
                 const presence = keywordPresenceScore(phrase, h.title, h.url, h.snippet);
-                // Use whichever is higher: text similarity or keyword presence.
-                // Then apply the source credibility floor — if this trusted source
-                // found a result at all, award at minimum credibilityFloor points.
-                const raw = Math.max(semantic, presence);
-                const sim = Math.max(raw, target.credibilityFloor);
+                // Best of: text similarity, keyword presence, or source credibility floor
+                const sim = Math.max(semantic, presence, target.credibilityFloor);
                 const exact = exactMatchFlag(phrase, candidate);
                 return { ...h, similarity: sim, exactMatch: exact };
               })
