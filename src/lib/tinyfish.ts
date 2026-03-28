@@ -12,32 +12,14 @@ export interface TinyfishStreamEvent {
 const TINYFISH_BASE = "https://agent.tinyfish.ai";
 const TIMEOUT_MS = 120_000;
 
-function buildGoal(phrase: string, domain: string): string {
-  const domainContext: Record<string, string> = {
-    blog: "on blogs, news sites, or articles",
-    research: "in academic papers, journals, or research sites",
-    songs: "on lyrics sites like Genius, AZLyrics, or music databases",
-    video: "in video descriptions, transcripts, or script sites",
-    social: "on social media posts, forums, or community platforms",
-    general: "across the web",
-  };
-  const ctx = domainContext[domain] ?? "across the web";
-
-  return (
-    `Go to https://www.google.com and search for this exact phrase: "${phrase}". ` +
-    `Focus on finding results ${ctx}. ` +
-    `Extract the top 5 search result items. ` +
-    `Return ONLY a JSON array with this shape: ` +
-    `[{"title":"...","url":"...","snippet":"..."}]. ` +
-    `The snippet must include the actual text shown by Google for that result. ` +
-    `Do not include any text outside the JSON array.`
-  );
-}
-
-/** Stream SSE events from the Tinyfish browser agent. */
+/**
+ * Stream SSE events from a single Tinyfish browser agent call.
+ * Caller supplies the target URL and a fully-constructed goal string.
+ * Implements §Stage 4: precise goals, structured JSON output.
+ */
 export async function* searchPhraseStream(
-  phrase: string,
-  domain: string,
+  targetUrl: string,
+  goal: string,
   signal?: AbortSignal
 ): AsyncGenerator<TinyfishStreamEvent> {
   const apiKey = process.env.TINYFISH_API_KEY;
@@ -55,8 +37,8 @@ export async function* searchPhraseStream(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      url: "https://www.google.com",
-      goal: buildGoal(phrase, domain),
+      url: targetUrl,
+      goal,
       browser_profile: "stealth",
     }),
     signal: combinedSignal,
@@ -129,7 +111,7 @@ export function parseSearchHits(raw: string): SearchHit[] {
       .map((item: Record<string, unknown>) => ({
         title: String(item.title ?? ""),
         url: String(item.url ?? ""),
-        snippet: String(item.snippet ?? item.description ?? item.text ?? ""),
+        snippet: String(item.snippet ?? item.description ?? item.text ?? item.excerpt ?? ""),
       }))
       .filter((h) => h.url && h.url.startsWith("http"));
   } catch {
