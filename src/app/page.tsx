@@ -55,6 +55,13 @@ interface BrowserState {
   steps: Array<{ ts: number; label: string; text: string }>;
 }
 
+interface FindEntry {
+  targetLabel: string;
+  title: string;
+  snippet: string;
+  similarity: number;
+}
+
 // ─── Domain config ─────────────────────────────────────────────────────────────
 
 const DOMAINS = [
@@ -442,6 +449,65 @@ function BrowserPanel({ browser }: { browser: BrowserState }) {
   );
 }
 
+// ─── Tinyfish Finds Box ───────────────────────────────────────────────────────
+
+function TinyfishFindsBox({ finds }: { finds: FindEntry[] }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!collapsed && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [finds, collapsed]);
+
+  if (finds.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 w-72 rounded-xl border shadow-2xl overflow-hidden"
+      style={{ borderColor: "var(--border)", background: "var(--surface)", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
+      {/* Header */}
+      <button
+        onClick={() => setCollapsed((c) => !c)}
+        className="w-full flex items-center justify-between px-3 py-2 border-b text-xs hover:bg-white/5 transition-colors"
+        style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-60" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500" />
+          </span>
+          <span className="font-semibold text-slate-300">What Tinyfish Found</span>
+          <span className="font-mono text-sky-400 bg-sky-500/15 border border-sky-500/25 rounded px-1.5 py-0.5">{finds.length}</span>
+        </div>
+        <span className="text-slate-600">{collapsed ? "▲" : "▼"}</span>
+      </button>
+
+      {/* Body */}
+      {!collapsed && (
+        <div ref={scrollRef} className="overflow-y-auto divide-y" style={{ maxHeight: "220px", borderColor: "var(--border)" }}>
+          {finds.map((f, i) => {
+            const scoreCls = f.similarity >= 70 ? "text-red-400" : f.similarity >= 40 ? "text-orange-400" : f.similarity >= 15 ? "text-yellow-400" : "text-emerald-400";
+            return (
+              <div key={i} className="px-3 py-2 space-y-0.5 hover:bg-white/3 transition-colors" style={{ borderColor: "var(--border)" }}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-sky-500 truncate">{f.targetLabel}</span>
+                  <span className={`text-xs font-mono font-bold flex-shrink-0 ${scoreCls}`}>{f.similarity}%</span>
+                </div>
+                {f.title && (
+                  <p className="text-xs text-slate-300 font-medium leading-snug line-clamp-1">{f.title}</p>
+                )}
+                {f.snippet && (
+                  <p className="text-xs text-slate-600 leading-snug line-clamp-2">{f.snippet}</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Legitimacy Banner ────────────────────────────────────────────────────────
 
 function LegitimacyBanner({ result }: { result: LegitimacyResult }) {
@@ -478,6 +544,7 @@ export default function Home() {
   const [legitimacy, setLegitimacy] = useState<LegitimacyResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [browser, setBrowser] = useState<BrowserState>(IDLE_BROWSER);
+  const [tinyfishFinds, setTinyfishFinds] = useState<FindEntry[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const phrasesRef = useRef<PhraseRow[]>([]);
   const activeCountRef = useRef(0);
@@ -497,6 +564,7 @@ export default function Home() {
     setLegitimacy(null);
     setErrorMsg("");
     setBrowser({ ...IDLE_BROWSER });
+    setTinyfishFinds([]);
     phrasesRef.current = [];
     activeCountRef.current = 0;
 
@@ -622,6 +690,18 @@ export default function Home() {
                   : r
               );
               setPhrases([...phrasesRef.current]);
+              // Accumulate hits into the finds box
+              if (Array.isArray(p.hits) && p.hits.length > 0) {
+                const topHit = (p.hits as Array<{ title: string; snippet: string; similarity: number }>)[0];
+                if (topHit && topHit.similarity > 0) {
+                  setTinyfishFinds((prev) => [...prev, {
+                    targetLabel: p.targetLabel as string,
+                    title: topHit.title ?? "",
+                    snippet: topHit.snippet ?? "",
+                    similarity: topHit.similarity ?? 0,
+                  }]);
+                }
+              }
               break;
 
             case "target_error":
@@ -670,6 +750,7 @@ export default function Home() {
     setLegitimacy(null);
     setErrorMsg("");
     setBrowser({ ...IDLE_BROWSER });
+    setTinyfishFinds([]);
     phrasesRef.current = [];
     activeCountRef.current = 0;
   };
@@ -916,6 +997,8 @@ export default function Home() {
           </div>
         </div>
       </main>
+
+      <TinyfishFindsBox finds={tinyfishFinds} />
 
       <footer className="border-t py-3 text-center text-xs text-slate-700" style={{ borderColor: "var(--border)" }}>
         plAIgiarism · Built with{" "}
