@@ -99,10 +99,13 @@ export async function POST(req: NextRequest) {
                     purpose: String(event.data.purpose ?? ""),
                   });
                 } else if (event.type === "COMPLETE") {
+                  const r = event.data.result;
+                  // result may already be a parsed object/array (tinyfish sends
+                  // the COMPLETE event data as JSON, so result is pre-parsed)
                   resultRaw =
-                    typeof event.data.result === "string"
-                      ? event.data.result
-                      : null;
+                    r == null ? null
+                    : typeof r === "string" ? r
+                    : JSON.stringify(r);
                   send("browser_close", {
                     phraseIndex: pi,
                     targetIndex: ti,
