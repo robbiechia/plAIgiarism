@@ -47,12 +47,15 @@ interface CompleteEvent {
   hasExactMatch: boolean;
 }
 
-interface BrowserState {
-  isActive: boolean;
-  activeCount: number;
+interface AgentTab {
+  id: string; // `${phraseIndex}-${targetIndex}`
+  phraseIndex: number;
+  targetIndex: number;
+  targetLabel: string;
+  phrase: string;
   streamingUrl: string | null;
-  activeLabel: string;
-  steps: Array<{ ts: number; label: string; text: string }>;
+  steps: Array<{ ts: number; text: string }>;
+  status: "active" | "done" | "error";
 }
 
 interface FindEntry {
@@ -250,145 +253,123 @@ function stepIcon(text: string): { icon: string; color: string } {
   return { icon: "▸", color: "text-slate-500" };
 }
 
-// ─── Browser Panel ────────────────────────────────────────────────────────────
+// ─── Browser Panel (tabbed per-agent) ────────────────────────────────────────
 
-function BrowserPanel({ browser }: { browser: BrowserState }) {
+function BrowserPanel({ agents }: { agents: AgentTab[] }) {
+  const [activeId, setActiveId] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
-  const startTs = useRef(0);
-  const openedUrls = useRef<Set<string>>(new Set());
 
-  // Auto-open streaming URL in a new tab the moment it arrives.
-  // This is the most reliable way to show the live browser — no iframe CSP issues.
+  // Auto-select the most recently activated agent
   useEffect(() => {
-    if (browser.streamingUrl && !openedUrls.current.has(browser.streamingUrl)) {
-      openedUrls.current.add(browser.streamingUrl);
-      window.open(browser.streamingUrl, "_blank", "noopener,noreferrer");
-    }
-  }, [browser.streamingUrl]);
+    const active = [...agents].reverse().find((a) => a.status === "active");
+    if (active) setActiveId(active.id);
+    else if (agents.length > 0 && !activeId) setActiveId(agents[agents.length - 1].id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents.length, agents.filter(a => a.status === "active").length]);
 
+  // Auto-scroll log on new steps
   useEffect(() => {
-    if (browser.steps.length > 0 && startTs.current === 0) startTs.current = browser.steps[0].ts;
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [browser.steps]);
+  }, [activeId, agents]);
 
-  const elapsed = (ts: number) =>
-    `+${Math.round((ts - (startTs.current || ts)) / 1000)}s`;
+  const selected = agents.find((a) => a.id === activeId) ?? agents[agents.length - 1] ?? null;
+  const startTs = selected?.steps[0]?.ts ?? 0;
+  const elapsed = (ts: number) => `+${Math.round((ts - (startTs || ts)) / 1000)}s`;
+  const lastStep = selected?.steps[selected.steps.length - 1];
+  const isActive = selected?.status === "active";
 
-  const lastStep = browser.steps[browser.steps.length - 1];
+  if (agents.length === 0) {
+    return (
+      <div className="rounded-xl border flex flex-col items-center justify-center gap-2 opacity-30"
+        style={{ borderColor: "var(--border)", background: "var(--surface)", height: "420px" }}>
+        <div className="text-3xl">🌐</div>
+        <p className="text-xs text-slate-600">Browser agents will appear here</p>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border overflow-hidden flex flex-col" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
 
-      {/* ── Chrome bar ── */}
-      <div className="flex items-center gap-2.5 px-3 py-2 border-b" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
-        <div className="flex gap-1.5 flex-shrink-0">
-          <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
-          <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
-        </div>
-
-        {/* URL bar */}
-        <div className="flex-1 flex items-center gap-1.5 rounded-md px-2.5 py-1 min-w-0"
-          style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
-          {browser.isActive ? (
-            <div className="w-2.5 h-2.5 rounded-full border-2 border-sky-500/40 border-t-sky-400 animate-spin flex-shrink-0" />
-          ) : (
-            <svg className="w-2.5 h-2.5 text-slate-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
-            </svg>
-          )}
-          <span className="text-xs font-mono truncate" style={{ color: browser.isActive ? "#94a3b8" : "#475569" }}>
-            {browser.activeLabel
-              ? browser.activeLabel.split("—")[0].trim().toLowerCase().replace(/\s+/g, "")
-              : "agent.tinyfish.ai"}
-          </span>
-        </div>
-
-        {/* Status */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {browser.isActive ? (
-            <>
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-              </span>
-              <span className="text-xs text-emerald-400 font-medium">Live</span>
-              {browser.activeCount > 1 && (
-                <span className="text-xs bg-sky-500/15 text-sky-400 border border-sky-500/25 rounded px-1 font-mono">
-                  ×{browser.activeCount}
-                </span>
+      {/* ── Tab bar ── */}
+      <div className="flex items-center border-b overflow-x-auto" style={{ borderColor: "var(--border)", background: "var(--surface2)", scrollbarWidth: "none" }}>
+        {agents.map((agent) => {
+          const isSelected = agent.id === activeId;
+          const dotCls = agent.status === "active" ? "bg-emerald-400 animate-pulse" : agent.status === "error" ? "bg-red-400" : "bg-slate-600";
+          return (
+            <button
+              key={agent.id}
+              onClick={() => setActiveId(agent.id)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs whitespace-nowrap border-b-2 transition-all flex-shrink-0 ${
+                isSelected
+                  ? "border-sky-500 text-sky-300 bg-sky-500/8"
+                  : "border-transparent text-slate-500 hover:text-slate-300 hover:bg-white/5"
+              }`}>
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotCls}`} />
+              <span className="font-medium">{agent.targetLabel}</span>
+              {agent.status === "done" && (
+                <span className="text-slate-700 text-xs">✓</span>
               )}
-            </>
-          ) : browser.steps.length > 0 ? (
-            <span className="text-xs text-slate-500">Done</span>
-          ) : (
-            <span className="text-xs text-slate-600">Idle</span>
-          )}
-        </div>
-
-        {/* Open streaming URL */}
-        {browser.streamingUrl && (
-          <a href={browser.streamingUrl} target="_blank" rel="noopener noreferrer"
-            className="flex-shrink-0 flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 border border-sky-500/30 rounded px-2 py-0.5 transition-all hover:bg-sky-500/10 whitespace-nowrap">
-            Watch live ↗
-          </a>
-        )}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Viewport ── */}
-      <div className="relative" style={{ height: "280px", background: "#0d1117" }}>
-        {browser.streamingUrl ? (
+      <div className="relative" style={{ height: "260px", background: "#0d1117" }}>
+        {selected?.streamingUrl ? (
           <>
-            {/* No sandbox — streaming URL needs WebSockets / full browser permissions */}
             <iframe
-              key={browser.streamingUrl}
-              src={browser.streamingUrl}
+              key={selected.streamingUrl}
+              src={selected.streamingUrl}
               className="w-full h-full border-0"
-              title="Tinyfish live browser"
+              title={`${selected.targetLabel} live browser`}
               allow="autoplay; clipboard-read; clipboard-write; encrypted-media; fullscreen; picture-in-picture; web-share; cross-origin-isolated"
               referrerPolicy="no-referrer-when-downgrade"
             />
-            {/* Overlay: open in full view */}
-            <div className="absolute top-2 right-2 z-10">
-              <a href={browser.streamingUrl} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs text-white rounded-md px-2.5 py-1.5 transition-all font-medium"
+            <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
+              {isActive && (
+                <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium rounded-md px-2 py-1"
+                  style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)", border: "1px solid rgba(16,185,129,0.25)" }}>
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                  </span>
+                  Live
+                </span>
+              )}
+              <a href={selected.streamingUrl} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-white rounded-md px-2 py-1 transition-all font-medium"
                 style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)", border: "1px solid rgba(255,255,255,0.1)" }}>
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
-                Full view
+                Pop out
               </a>
             </div>
           </>
-        ) : browser.isActive ? (
-          /* ── Animated placeholder while stream loads ── */
+        ) : (
+          /* Skeleton while waiting for streaming URL */
           <div className="flex flex-col h-full">
-            {/* Fake inner address bar */}
             <div className="px-3 py-2 border-b flex items-center gap-2" style={{ borderColor: "#1a2235", background: "#0f1623" }}>
               <div className="w-3 h-3 rounded-full border-2 border-t-sky-400 border-sky-500/30 animate-spin flex-shrink-0" />
               <div className="flex-1 text-xs font-mono text-slate-500 truncate">
-                {browser.activeLabel ? browser.activeLabel.split("—")[0].trim() : "Connecting to browser…"}
+                {selected ? `Connecting to ${selected.targetLabel}…` : "Waiting…"}
               </div>
             </div>
-
-            {/* Skeleton page content */}
             <div className="flex-1 p-4 space-y-3">
-              {/* Fake search bar */}
               <div className="flex gap-2 mb-4">
-                <div className="flex-1 h-8 rounded-full bg-slate-800/80 animate-pulse" />
-                <div className="w-16 h-8 rounded-full bg-slate-800/50 animate-pulse" />
+                <div className="flex-1 h-7 rounded-full bg-slate-800/80 animate-pulse" />
+                <div className="w-14 h-7 rounded-full bg-slate-800/50 animate-pulse" />
               </div>
-              {/* Fake results */}
-              {[100, 85, 70, 60].map((w, i) => (
-                <div key={i} className="space-y-1.5" style={{ animationDelay: `${i * 100}ms` }}>
-                  <div className="h-2.5 rounded-full bg-sky-900/40 animate-pulse" style={{ width: `${w * 0.6}%` }} />
+              {[100, 80, 65, 50].map((w, i) => (
+                <div key={i} className="space-y-1.5">
+                  <div className="h-2.5 rounded-full bg-sky-900/40 animate-pulse" style={{ width: `${w * 0.55}%` }} />
                   <div className="h-2 rounded-full bg-slate-800/60 animate-pulse" style={{ width: `${w}%` }} />
-                  <div className="h-2 rounded-full bg-slate-800/40 animate-pulse" style={{ width: `${w * 0.8}%` }} />
+                  <div className="h-2 rounded-full bg-slate-800/40 animate-pulse" style={{ width: `${w * 0.75}%` }} />
                 </div>
               ))}
             </div>
-
-            {/* Current action overlay */}
             {lastStep && (
               <div className="px-3 pb-3">
                 <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2"
@@ -399,44 +380,30 @@ function BrowserPanel({ browser }: { browser: BrowserState }) {
               </div>
             )}
           </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full gap-2 opacity-30">
-            <div className="text-3xl">🌐</div>
-            <p className="text-xs text-slate-600">Browser agent will appear here</p>
-          </div>
         )}
       </div>
 
-      {/* ── Action log ── */}
-      <div ref={logRef} className="overflow-y-auto" style={{ maxHeight: "160px", background: "#080b11" }}>
-        {browser.steps.length === 0 ? (
+      {/* ── Action log for selected agent ── */}
+      <div ref={logRef} className="overflow-y-auto" style={{ maxHeight: "140px", background: "#080b11" }}>
+        {!selected || selected.steps.length === 0 ? (
           <p className="text-xs text-slate-700 px-3 py-2">Waiting for browser actions…</p>
         ) : (
           <div className="py-1.5">
-            {browser.steps.map((step, i) => {
-              const isLast = i === browser.steps.length - 1;
+            {selected.steps.map((step, i) => {
+              const isLast = i === selected.steps.length - 1;
               const { icon, color } = stepIcon(step.text);
               return (
-                <div key={i}
-                  className={`flex items-start gap-2.5 px-3 py-1 text-xs transition-colors ${
-                    isLast && browser.isActive ? "bg-sky-950/30" : ""
-                  }`}>
+                <div key={i} className={`flex items-start gap-2.5 px-3 py-1 text-xs transition-colors ${isLast && isActive ? "bg-sky-950/30" : ""}`}>
                   <span className="font-mono text-slate-700 w-7 text-right flex-shrink-0 tabular-nums pt-0.5">
                     {elapsed(step.ts)}
                   </span>
-                  <span className={`flex-shrink-0 text-sm leading-none pt-px ${isLast && browser.isActive ? color : "opacity-40"}`}>
+                  <span className={`flex-shrink-0 text-sm leading-none pt-px ${isLast && isActive ? color : "opacity-40"}`}>
                     {icon}
                   </span>
-                  <div className="flex-1 min-w-0">
-                    <span className={`font-medium text-xs ${isLast && browser.isActive ? "text-sky-600" : "text-slate-700"}`}>
-                      [{step.label}]
-                    </span>
-                    {" "}
-                    <span className={isLast && browser.isActive ? "text-slate-300" : "text-slate-600"}>
-                      {step.text}
-                    </span>
-                  </div>
-                  {isLast && browser.isActive && (
+                  <span className={isLast && isActive ? "text-slate-300 flex-1 min-w-0 truncate" : "text-slate-600 flex-1 min-w-0 truncate"}>
+                    {step.text}
+                  </span>
+                  {isLast && isActive && (
                     <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse mt-1" />
                   )}
                 </div>
@@ -531,10 +498,6 @@ function LegitimacyBanner({ result }: { result: LegitimacyResult }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-const IDLE_BROWSER: BrowserState = {
-  isActive: false, activeCount: 0, streamingUrl: null, activeLabel: "", steps: [],
-};
-
 export default function Home() {
   const [content, setContent] = useState("");
   const [domain, setDomain] = useState("general");
@@ -543,7 +506,7 @@ export default function Home() {
   const [result, setResult] = useState<CompleteEvent | null>(null);
   const [legitimacy, setLegitimacy] = useState<LegitimacyResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
-  const [browser, setBrowser] = useState<BrowserState>(IDLE_BROWSER);
+  const [agents, setAgents] = useState<AgentTab[]>([]);
   const [tinyfishFinds, setTinyfishFinds] = useState<FindEntry[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const phrasesRef = useRef<PhraseRow[]>([]);
@@ -563,7 +526,7 @@ export default function Home() {
     setResult(null);
     setLegitimacy(null);
     setErrorMsg("");
-    setBrowser({ ...IDLE_BROWSER });
+    setAgents([]);
     setTinyfishFinds([]);
     phrasesRef.current = [];
     activeCountRef.current = 0;
@@ -632,8 +595,9 @@ export default function Home() {
               setPhrases([...phrasesRef.current]);
               break;
 
-            case "target_start":
+            case "target_start": {
               activeCountRef.current++;
+              const agentId = `${p.phraseIndex}-${p.targetIndex}`;
               phrasesRef.current = phrasesRef.current.map((r) =>
                 r.phraseIndex === p.phraseIndex
                   ? { ...r, targets: r.targets.map((t) =>
@@ -642,41 +606,49 @@ export default function Home() {
                   : r
               );
               setPhrases([...phrasesRef.current]);
-              setBrowser((prev) => ({
-                ...prev,
-                isActive: true,
-                activeCount: activeCountRef.current,
-                activeLabel: `${p.targetLabel} — ${p.phrase?.slice(0, 40)}…`,
-                steps: [...prev.steps, { ts: Date.now(), label: p.targetLabel, text: "Agent started" }],
-              }));
+              setAgents((prev) => {
+                const exists = prev.find((a) => a.id === agentId);
+                if (exists) return prev;
+                return [...prev, {
+                  id: agentId,
+                  phraseIndex: p.phraseIndex as number,
+                  targetIndex: p.targetIndex as number,
+                  targetLabel: p.targetLabel as string,
+                  phrase: (p.phrase as string) ?? "",
+                  streamingUrl: null,
+                  steps: [{ ts: Date.now(), text: "Agent started" }],
+                  status: "active" as const,
+                }];
+              });
               break;
+            }
 
             case "browser_open":
-              setBrowser((prev) => ({
-                ...prev,
-                streamingUrl: p.streamingUrl ?? prev.streamingUrl,
-                activeLabel: p.targetLabel,
-                steps: [...prev.steps, { ts: Date.now(), label: p.targetLabel, text: "Browser opened" }],
-              }));
+              setAgents((prev) => prev.map((a) =>
+                a.phraseIndex === p.phraseIndex && a.targetIndex === p.targetIndex
+                  ? { ...a, streamingUrl: (p.streamingUrl as string) ?? a.streamingUrl,
+                      steps: [...a.steps, { ts: Date.now(), text: "Browser opened" }] }
+                  : a
+              ));
               break;
 
             case "browser_step":
               if (p.purpose) {
-                setBrowser((prev) => ({
-                  ...prev,
-                  steps: [...prev.steps, { ts: Date.now(), label: p.targetLabel, text: String(p.purpose) }],
-                }));
+                setAgents((prev) => prev.map((a) =>
+                  a.phraseIndex === p.phraseIndex && a.targetIndex === p.targetIndex
+                    ? { ...a, steps: [...a.steps, { ts: Date.now(), text: String(p.purpose) }] }
+                    : a
+                ));
               }
               break;
 
             case "browser_close":
               activeCountRef.current = Math.max(0, activeCountRef.current - 1);
-              setBrowser((prev) => ({
-                ...prev,
-                activeCount: activeCountRef.current,
-                isActive: activeCountRef.current > 0,
-                steps: [...prev.steps, { ts: Date.now(), label: p.targetLabel, text: "Extraction complete" }],
-              }));
+              setAgents((prev) => prev.map((a) =>
+                a.phraseIndex === p.phraseIndex && a.targetIndex === p.targetIndex
+                  ? { ...a, steps: [...a.steps, { ts: Date.now(), text: "Extraction complete" }], status: "done" as const }
+                  : a
+              ));
               break;
 
             case "target_done":
@@ -713,6 +685,11 @@ export default function Home() {
                   : r
               );
               setPhrases([...phrasesRef.current]);
+              setAgents((prev) => prev.map((a) =>
+                a.phraseIndex === p.phraseIndex && a.targetIndex === p.targetIndex
+                  ? { ...a, status: "error" as const, steps: [...a.steps, { ts: Date.now(), text: String(p.message ?? "Error") }] }
+                  : a
+              ));
               break;
 
             case "phrase_done":
@@ -725,7 +702,7 @@ export default function Home() {
             case "complete":
               setResult(p);
               setStatus("done");
-              setBrowser((prev) => ({ ...prev, isActive: false, activeCount: 0 }));
+              setAgents((prev) => prev.map((a) => a.status === "active" ? { ...a, status: "done" as const } : a));
               break;
 
             case "error":
@@ -749,7 +726,7 @@ export default function Home() {
     setResult(null);
     setLegitimacy(null);
     setErrorMsg("");
-    setBrowser({ ...IDLE_BROWSER });
+    setAgents([]);
     setTinyfishFinds([]);
     phrasesRef.current = [];
     activeCountRef.current = 0;
@@ -773,7 +750,7 @@ export default function Home() {
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <span className={`w-1.5 h-1.5 rounded-full inline-block ${isRunning ? "bg-emerald-500 animate-pulse" : "bg-slate-600"}`} />
             {isRunning
-              ? `${browser.activeCount > 0 ? `${browser.activeCount} agent${browser.activeCount > 1 ? "s" : ""} running` : "Processing…"}`
+              ? `${activeCountRef.current > 0 ? `${activeCountRef.current} agent${activeCountRef.current > 1 ? "s" : ""} running` : "Processing…"}`
               : "Live web search"}
           </div>
         </div>
@@ -869,7 +846,7 @@ export default function Home() {
               <h3 className="text-sm font-semibold text-slate-300">Browser Agent</h3>
               <p className="text-xs text-slate-600 mt-0.5">Live view of Tinyfish searching domain-specific sources</p>
             </div>
-            <BrowserPanel browser={browser} />
+            <BrowserPanel agents={agents} />
 
             {/* Phrase / target progress */}
             {phrases.length > 0 && (
